@@ -171,9 +171,9 @@ func deviceLogin(zoneID string, siteID string, num int, isFirst bool) {
 			// 向用户交互模块发出登录请求，获取实例信息
 			instance, err := sendLoginRequest(device.DeviceID, device.ZoneID, device.SiteID)
 			if err != nil {
-				fmt.Printf("Failed to log in: %v", err)
-			}
-			if instance == nil {
+				fmt.Printf("Failed to log in: %v\n", err)
+				return
+			} else if instance == nil {
 				fmt.Println("The value of instance is nil")
 				return
 			}
@@ -310,10 +310,6 @@ func sendLoginRequest(deviceId string, zoneId string, siteId string) (*Instance,
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to login with status code: %d", resp.StatusCode)
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
@@ -323,6 +319,10 @@ func sendLoginRequest(deviceId string, zoneId string, siteId string) (*Instance,
 	err = json.Unmarshal([]byte(string(body)), &response)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse respinse body: %w", err)
+	}
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to login with status code: %d, error message: %s", response.StatusCode, string(response.Data))
 	}
 
 	var deviceLoginResponse DeviceLoginResponse
@@ -345,10 +345,6 @@ func sendLogoutRequest(deviceId string, zoneId string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to log out with status code: %d", resp.StatusCode)
-	}
-
 	// 使用io.ReadAll读取响应体
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -360,5 +356,10 @@ func sendLogoutRequest(deviceId string, zoneId string) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse response body: %w", err)
 	}
+
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to logout with status code: %d, error message: %s", response.StatusCode, string(response.Data))
+	}
+
 	return nil
 }
