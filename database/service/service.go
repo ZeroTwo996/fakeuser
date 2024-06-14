@@ -67,9 +67,9 @@ func GetRecordWithDate(date string) (map[string]int, error) {
 }
 
 // InsertRecord 插入记录到 records 表
-func InsertRecord(zoneID string, siteID string, date string, instances int) error {
-	insertQuery := fmt.Sprintf("INSERT INTO record_%s (site_id, date, instances) VALUES (?, ?, ?)", zoneID)
-	if _, err := database.DB.Exec(insertQuery, siteID, date, instances); err != nil {
+func InsertRecord(zoneID string, siteID string, date string, instances int, loginFailures int) error {
+	insertQuery := fmt.Sprintf("INSERT INTO record_%s (site_id, date, instances, login_failures) VALUES (?, ?, ?, ?)", zoneID)
+	if _, err := database.DB.Exec(insertQuery, siteID, date, instances, loginFailures); err != nil {
 		return err
 	}
 

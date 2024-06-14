@@ -7,44 +7,29 @@ import (
 )
 
 var (
-	MYSQLHOST     string // MYSQL服务地址
-	MYSQLPORT     string // MYSQL服务端口
-	MYSQLUSER     string // MYSQL服务用户
-	MYSQLPASSWORD string // MYSQL服务密码
-	MYSQLDATABASE string // MYSQL服务数据库
+	LOGINPATH          = "device/login"  // 登录接口路径
+	LOGOUTPATH         = "device/logout" // 登出接口路径
+	USERCENTERPROTOCOL = "http"          // 用户交互模块协议
+	MAXHISTORYNUMBER   = 180             // 预测算法输入长度
 
-	// MYSQLHOST     = "localhost"
-	// MYSQLPORT     = "3306"
-	// MYSQLUSER     = "root"
-	// MYSQLPASSWORD = "1435"
-	// MYSQLDATABASE = "huawei"
-
-	// MYSQLHOST     = "10.10.103.51"
-	// MYSQLPORT     = "30565"
-	// MYSQLUSER     = "root"
-	// MYSQLPASSWORD = "cloudgame"
-	// MYSQLDATABASE = "cloudgame"
-
-	UserCenterIP   = "10.10.103.51"
-	UserCenterPort = "30127"
-	Protocol       = "http"
-	LoginPath      = "device/login"
-	LogoutPath     = "device/logout"
-
+	MYSQLHOST         string // MYSQL服务地址
+	MYSQLPORT         string // MYSQL服务端口
+	MYSQLUSER         string // MYSQL服务用户
+	MYSQLPASSWORD     string // MYSQL服务密码
+	MYSQLDATABASE     string // MYSQL服务数据库
+	USERCENTERHOST    string // 用户交互模块地址
+	USERCENTERPORT    string // 用户交互模块端口
 	ACCELERATIONRATIO int
-
-	MAXHISTORYNUMBER = 180
-
-	STARTTIME string
+	STARTTIME         string
 )
 
 func init() {
-	MYSQLHOST = os.Getenv("MYSQL_HOST")
+	MYSQLHOST = os.Getenv("MYSQL_SERVICE_SERVICE_HOST")
 	if MYSQLHOST == "" {
 		log.Fatalf("Failed to get mysql host from env")
 	}
 
-	MYSQLPORT = os.Getenv("MYSQL_PORT")
+	MYSQLPORT = os.Getenv("MYSQL_SERVICE_SERVICE_PORT")
 	if MYSQLPORT == "" {
 		log.Fatalf("Failed to get mysql port from env")
 	}
@@ -62,6 +47,16 @@ func init() {
 	MYSQLDATABASE = os.Getenv("MYSQL_DATABASE")
 	if MYSQLDATABASE == "" {
 		log.Fatalf("Failed to get mysql database from env")
+	}
+
+	USERCENTERHOST = os.Getenv("USERCENTER_SERVICE_SERVICE_HOST")
+	if USERCENTERHOST == "" {
+		log.Fatalf("Failed to get usercenter host from env")
+	}
+
+	USERCENTERPORT = os.Getenv("USERCENTER_SERVICE_SERVICE_PORT")
+	if USERCENTERPORT == "" {
+		log.Fatalf("Failed to get usercenter port from env")
 	}
 
 	var err error

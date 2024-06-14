@@ -116,9 +116,10 @@ func main() {
 
 		for siteID, currInstances := range currRecords {
 			log.Println("**********************************")
+			var loginFailures int
 			if prevRecords == nil {
 				// 首次需要特殊处理，直接登录相应数量用户
-				deviceLogin("huadong", siteID, currInstances, true)
+				loginFailures = deviceLogin("huadong", siteID, currInstances, true)
 			} else {
 				// 余下只需要跟上一分钟对比
 				prevInstances, ok := prevRecords[siteID]
@@ -128,14 +129,13 @@ func main() {
 				}
 				diff := currInstances - prevInstances
 				if diff > 0 {
-					deviceLogin("huadong", siteID, diff, false)
-
+					loginFailures = deviceLogin("huadong", siteID, diff, false)
 				} else if diff < 0 {
 					deviceLogout(-diff, "huadong", siteID)
 				}
 			}
 
-			dbservice.InsertRecord("huadong", siteID, curTime.Format(template), currInstances)
+			dbservice.InsertRecord("huadong", siteID, curTime.Format(template), currInstances-loginFailures, loginFailures)
 			log.Println()
 		}
 		log.Printf("Current online device count: %d", getCurrentOnlineDeviceCount())
@@ -148,7 +148,8 @@ func main() {
 	}
 }
 
-func deviceLogin(zoneID string, siteID string, num int, isFirst bool) {
+// Returns: the number of login failure
+func deviceLogin(zoneID string, siteID string, num int, isFirst bool) int {
 	var wg sync.WaitGroup
 	var devices []string
 
@@ -202,6 +203,7 @@ func deviceLogin(zoneID string, siteID string, num int, isFirst bool) {
 		}
 		log.Printf("%d devices logged in %s, %s", len(devices), siteID, zoneID)
 	}
+	return num - len(devices)
 }
 
 func deviceLogout(num int, zoneID string, siteID string) {
@@ -299,7 +301,7 @@ func sendDisConnectRequest(host string, port int) error {
 }
 
 func sendLoginRequest(deviceId string, zoneId string, siteId string) (*Instance, error) {
-	urlStr := fmt.Sprintf("%s://%s:%s/%s", config.Protocol, config.UserCenterIP, config.UserCenterPort, config.LoginPath)
+	urlStr := fmt.Sprintf("%s://%s:%s/%s", config.USERCENTERPROTOCOL, config.USERCENTERHOST, config.USERCENTERPORT, config.LOGINPATH)
 	resp, err := http.PostForm(urlStr, url.Values{
 		"zone_id":   {zoneId},
 		"site_id":   {siteId},
@@ -335,7 +337,7 @@ func sendLoginRequest(deviceId string, zoneId string, siteId string) (*Instance,
 }
 
 func sendLogoutRequest(deviceId string, zoneId string) error {
-	urlStr := fmt.Sprintf("%s://%s:%s/%s", config.Protocol, config.UserCenterIP, config.UserCenterPort, config.LogoutPath)
+	urlStr := fmt.Sprintf("%s://%s:%s/%s", config.USERCENTERPROTOCOL, config.USERCENTERHOST, config.USERCENTERPORT, config.LOGOUTPATH)
 	resp, err := http.PostForm(urlStr, url.Values{
 		"zone_id":   {zoneId},
 		"device_id": {deviceId},
