@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,11 +55,17 @@ type DeviceLoginResponse struct {
 }
 
 var (
-	onlineDevices sync.Map
-	template      = "2006-01-02 15:04:00"
+	ningboDevices   sync.Map
+	hangzhouDevices sync.Map
+	onlineDevices   map[string]*sync.Map
+	template        = "2006-01-02 15:04:00"
 )
 
 func main() {
+	onlineDevices = make(map[string]*sync.Map)
+	onlineDevices["hangzhou"] = &hangzhouDevices
+	onlineDevices["ningbo"] = &ningboDevices
+
 	// 获取开始时间，如果配置了就从配置时间开始，否则从数据库读取最早的数据
 	var (
 		startTimeStr string
@@ -88,9 +95,12 @@ func main() {
 		log.Println("Failed to parse end time: ", err)
 		return
 	}
+	var (
+		preTime      = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC)
+		prevRecords  = make(map[string]int)
+		firstRequest = true
+	)
 	// 定时任务
-	var preTime = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC)
-	var prevRecords map[string]int
 	ticker := time.NewTicker(time.Duration(60*1000/config.ACCELERATIONRATIO) * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -110,16 +120,19 @@ func main() {
 		}
 		currRecords, err = dbservice.GetRecordWithDate(curTime.Format(template))
 		if err != nil {
-			fmt.Printf("Failed to get record at %s: %v\n", startTimeStr, err)
+			log.Printf("Failed to get record at %s: %v", startTimeStr, err)
 			break
 		}
 
 		for siteID, currInstances := range currRecords {
 			log.Println("**********************************")
 			var loginFailures int
-			if prevRecords == nil {
+			if firstRequest {
 				// 首次需要特殊处理，直接登录相应数量用户
-				loginFailures = deviceLogin("huadong", siteID, currInstances, true)
+				loginFailures = deviceLogin("huadong", siteID, currInstances)
+				if loginFailures != 0 {
+					log.Printf("Failure: %d devices in %s failed to login", loginFailures, siteID)
+				}
 			} else {
 				// 余下只需要跟上一分钟对比
 				prevInstances, ok := prevRecords[siteID]
@@ -129,19 +142,22 @@ func main() {
 				}
 				diff := currInstances - prevInstances
 				if diff > 0 {
-					loginFailures = deviceLogin("huadong", siteID, diff, false)
+					loginFailures = deviceLogin("huadong", siteID, diff)
+					if loginFailures != 0 {
+						log.Printf("Failure: %d devices in %s failed to login", loginFailures, siteID)
+					}
 				} else if diff < 0 {
 					deviceLogout(-diff, "huadong", siteID)
 				}
 			}
 
-			dbservice.InsertRecord("huadong", siteID, curTime.Format(template), currInstances-loginFailures, loginFailures)
-			log.Println()
-		}
-		log.Printf("Current online device count: %d", getCurrentOnlineDeviceCount())
+			dbservice.InsertRecord("huadong", siteID, curTime.Format(template), deviceCount(siteID), loginFailures)
+			log.Printf("Current: %d devices in %s are online now", deviceCount(siteID), siteID)
 
-		prevRecords = currRecords
+			prevRecords[siteID] = deviceCount(siteID)
+		}
 		preTime = curTime
+		firstRequest = false
 
 		log.Println()
 		log.Println()
@@ -149,21 +165,24 @@ func main() {
 }
 
 // Returns: the number of login failure
-func deviceLogin(zoneID string, siteID string, num int, isFirst bool) int {
-	var wg sync.WaitGroup
-	var devices []string
+func deviceLogin(zoneID string, siteID string, num int) int {
+	var (
+		wg           sync.WaitGroup
+		devices      []string
+		devicesMutex sync.Mutex
+	)
 
 	for i := 0; i < num; i++ {
 		wg.Add(1)
 		// 异步调用登录接口
-		go func(isFirst bool) {
+		go func() {
 			defer wg.Done()
 			var device Device
 			// 获取一个不重复device_id
 			for {
 				randomId := uuid.NewUUID()
 				deviceID := fmt.Sprintf("Dev-%s", randomId)
-				if _, exist := onlineDevices.Load(deviceID); !exist {
+				if _, exist := onlineDevices[siteID].Load(deviceID); !exist {
 					device = Device{ZoneID: zoneID, SiteID: siteID, DeviceID: deviceID}
 					break
 				}
@@ -172,37 +191,38 @@ func deviceLogin(zoneID string, siteID string, num int, isFirst bool) int {
 			// 向用户交互模块发出登录请求，获取实例信息
 			instance, err := sendLoginRequest(device.DeviceID, device.ZoneID, device.SiteID)
 			if err != nil {
-				fmt.Printf("Failed to log in: %v\n", err)
+				log.Printf("Failed to log in: %v", err)
 				return
 			} else if instance == nil {
-				fmt.Println("The value of instance is nil")
+				log.Println("The value of instance is nil")
 				return
 			}
 
 			// 连接具体实例
 			err = sendConnectRequest(device.DeviceID, instance.ServerIP, instance.Port)
 			if err != nil {
-				fmt.Printf("Failed to connect instance: %v\n", err)
+				log.Printf("Failed to connect instance: %v", err)
 				return
 			}
 
 			device.Host = instance.ServerIP
 			device.Port = instance.Port
+			onlineDevices[siteID].Store(device.DeviceID, device)
+
+			devicesMutex.Lock()
 			devices = append(devices, device.DeviceID)
-			onlineDevices.Store(device.DeviceID, device)
-		}(isFirst)
+			devicesMutex.Unlock()
+		}()
 	}
 
 	wg.Wait()
 
-	if isFirst {
-		log.Printf("Toal %d devices logged in %s, %s", len(devices), siteID, zoneID)
-	} else {
-		for _, id := range devices {
-			log.Println(id)
-		}
-		log.Printf("%d devices logged in %s, %s", len(devices), siteID, zoneID)
+	arrays := devices
+	if len(arrays) > 3 {
+		arrays = arrays[:3]
+		arrays = append(arrays, "...")
 	}
+	log.Printf("[%s] %d devices logged in %s, %s", strings.Join(arrays, ", "), len(devices), siteID, zoneID)
 	return num - len(devices)
 }
 
@@ -210,7 +230,7 @@ func deviceLogout(num int, zoneID string, siteID string) {
 
 	// 1. 选择num个在对应zone和site的设备
 	var devices []string
-	onlineDevices.Range(func(key, value interface{}) bool {
+	onlineDevices[siteID].Range(func(key, value interface{}) bool {
 		device := value.(Device)
 		if device.ZoneID == zoneID && device.SiteID == siteID {
 			devices = append(devices, device.DeviceID)
@@ -225,34 +245,38 @@ func deviceLogout(num int, zoneID string, siteID string) {
 	// 2. 将选中的设备调用登出接口，并在map中删除
 	var devicesLoggedOut []string
 	for _, deviceID := range devices {
-		value, _ := onlineDevices.Load(deviceID)
+		value, _ := onlineDevices[siteID].Load(deviceID)
 		device := value.(Device)
 
 		// 2.1 向实例发出断开连接请求
 		err := sendDisConnectRequest(device.Host, device.Port)
 		if err != nil {
-			fmt.Printf("Failed to disconnect instance: %v\n", err)
+			log.Printf("Failed to disconnect instance: %v", err)
 			continue
 		}
 
 		// 2.2 向用户交互模块发出登出请求
 		err = sendLogoutRequest(device.DeviceID, device.ZoneID)
 		if err != nil {
-			fmt.Printf("Failed to log out from usercenter: %v\n", err)
+			log.Printf("Failed to log out from usercenter: %v", err)
 			continue
 		}
 
-		onlineDevices.Delete(deviceID)
-		log.Println(deviceID)
+		onlineDevices[siteID].Delete(deviceID)
 		devicesLoggedOut = append(devicesLoggedOut, deviceID)
-
 	}
-	log.Printf("%d devices logged out in %s, %s", len(devicesLoggedOut), siteID, zoneID)
+
+	arrays := devicesLoggedOut
+	if len(arrays) > 3 {
+		arrays = arrays[:3]
+		arrays = append(arrays, "...")
+	}
+	log.Printf("[%s] %d devices logged out in %s, %s", strings.Join(arrays, ", "), len(devicesLoggedOut), siteID, zoneID)
 }
 
-func getCurrentOnlineDeviceCount() int {
+func deviceCount(siteID string) int {
 	count := 0
-	onlineDevices.Range(func(_, _ interface{}) bool {
+	onlineDevices[siteID].Range(func(_, _ interface{}) bool {
 		count++
 		return true
 	})

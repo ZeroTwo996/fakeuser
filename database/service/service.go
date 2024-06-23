@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fakeuser/config"
 	"fakeuser/database"
 	"fmt"
 )
@@ -59,8 +60,8 @@ func GetRecordWithDate(date string) (map[string]int, error) {
 		if err != nil {
 			return nil, err
 		}
-		records[site_id] = instances
-		fmt.Printf("	%s: %d", site_id, instances)
+		records[site_id] = instances / config.SCALERATIO
+		fmt.Printf("	%s: %d", site_id, records[site_id])
 	}
 	fmt.Println()
 	return records, nil

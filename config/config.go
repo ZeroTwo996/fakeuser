@@ -19,8 +19,9 @@ var (
 	MYSQLDATABASE     string // MYSQL服务数据库
 	USERCENTERHOST    string // 用户交互模块地址
 	USERCENTERPORT    string // 用户交互模块端口
-	ACCELERATIONRATIO int
-	STARTTIME         string
+	STARTTIME         string // 测试开始时间
+	ACCELERATIONRATIO int    // 加速比例
+	SCALERATIO        int    // 缩放比例
 )
 
 func init() {
@@ -59,6 +60,11 @@ func init() {
 		log.Fatalf("Failed to get usercenter port from env")
 	}
 
+	STARTTIME = os.Getenv("START_TIME")
+	if STARTTIME == "" {
+		log.Fatalf("Failed to get start time from env")
+	}
+
 	var err error
 	ACCELERATIONRATIO, err = strconv.Atoi(os.Getenv("ACCELERATION_RATIO"))
 	if err != nil {
@@ -67,5 +73,11 @@ func init() {
 		log.Fatal("Acceleration ratio cannot be zero")
 	}
 
-	STARTTIME = os.Getenv("START_TIME")
+	SCALERATIO, err = strconv.Atoi(os.Getenv("SCALE_RATIO"))
+	if err != nil {
+		log.Fatal("Failed to get instance scale ratio from env")
+	} else if SCALERATIO == 0 {
+		log.Fatal("Instance scale ratio cannot be zero")
+	}
+
 }
