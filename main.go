@@ -167,9 +167,9 @@ func main() {
 // Returns: the number of login failure
 func deviceLogin(zoneID string, siteID string, num int) int {
 	var (
-		wg           sync.WaitGroup
-		devices      []string
-		devicesMutex sync.Mutex
+		wg      sync.WaitGroup
+		devices []string
+		mutex   sync.Mutex
 	)
 
 	for i := 0; i < num; i++ {
@@ -207,11 +207,11 @@ func deviceLogin(zoneID string, siteID string, num int) int {
 
 			device.Host = instance.ServerIP
 			device.Port = instance.Port
-			onlineDevices[siteID].Store(device.DeviceID, device)
 
-			devicesMutex.Lock()
+			mutex.Lock()
+			onlineDevices[siteID].Store(device.DeviceID, device)
 			devices = append(devices, device.DeviceID)
-			devicesMutex.Unlock()
+			mutex.Unlock()
 		}()
 	}
 
@@ -248,27 +248,31 @@ func deviceLogout(num int, zoneID string, siteID string) {
 		value, _ := onlineDevices[siteID].Load(deviceID)
 		device := value.(Device)
 
+		onlineDevices[siteID].Delete(deviceID)
+
+		ok := true
 		// 2.1 向实例发出断开连接请求
 		err := sendDisConnectRequest(device.Host, device.Port)
 		if err != nil {
 			log.Printf("Failed to disconnect instance: %v", err)
-			continue
+			ok = false
 		}
 
 		// 2.2 向用户交互模块发出登出请求
 		err = sendLogoutRequest(device.DeviceID, device.ZoneID)
 		if err != nil {
 			log.Printf("Failed to log out from usercenter: %v", err)
-			continue
+			ok = false
 		}
 
-		onlineDevices[siteID].Delete(deviceID)
-		devicesLoggedOut = append(devicesLoggedOut, deviceID)
+		if ok {
+			devicesLoggedOut = append(devicesLoggedOut, deviceID)
+		}
 	}
 
 	arrays := devicesLoggedOut
-	if len(arrays) > 3 {
-		arrays = arrays[:3]
+	if len(arrays) > 4 {
+		arrays = arrays[:4]
 		arrays = append(arrays, "...")
 	}
 	log.Printf("[%s] %d devices logged out in %s, %s", strings.Join(arrays, ", "), len(devicesLoggedOut), siteID, zoneID)
@@ -308,7 +312,7 @@ func sendDisConnectRequest(host string, port int) error {
 	urlStr := fmt.Sprintf("http://%s:%d/disconnect", host, port)
 	resp, err := http.Get(urlStr)
 	if err != nil {
-		return fmt.Errorf("failed to send connect request: %w", err)
+		return fmt.Errorf("failed to send disconnect request: %w", err)
 	}
 	defer resp.Body.Close()
 
