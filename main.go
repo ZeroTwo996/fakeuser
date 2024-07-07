@@ -59,9 +59,14 @@ var (
 	hangzhouDevices sync.Map
 	onlineDevices   map[string]*sync.Map
 	template        = "2006-01-02 15:04:00"
+	httpClient      *http.Client
 )
 
 func main() {
+	httpClient = &http.Client{
+		Timeout: 2 * time.Second,
+	}
+
 	onlineDevices = make(map[string]*sync.Map)
 	onlineDevices["hangzhou"] = &hangzhouDevices
 	onlineDevices["ningbo"] = &ningboDevices
@@ -250,24 +255,20 @@ func deviceLogout(num int, zoneID string, siteID string) {
 
 		onlineDevices[siteID].Delete(deviceID)
 
-		ok := true
 		// 2.1 向实例发出断开连接请求
 		err := sendDisConnectRequest(device.Host, device.Port)
 		if err != nil {
 			log.Printf("Failed to disconnect instance: %v", err)
-			ok = false
+			continue
 		}
 
 		// 2.2 向用户交互模块发出登出请求
 		err = sendLogoutRequest(device.DeviceID, device.ZoneID)
 		if err != nil {
 			log.Printf("Failed to log out from usercenter: %v", err)
-			ok = false
+			continue
 		}
-
-		if ok {
-			devicesLoggedOut = append(devicesLoggedOut, deviceID)
-		}
+		devicesLoggedOut = append(devicesLoggedOut, deviceID)
 	}
 
 	arrays := devicesLoggedOut
@@ -289,48 +290,47 @@ func deviceCount(siteID string) int {
 
 func sendConnectRequest(deviceId string, host string, port int) error {
 	urlStr := fmt.Sprintf("http://%s:%d/connect", host, port)
-	resp, err := http.PostForm(urlStr, url.Values{
-		"device_id": {deviceId},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to send connect request: %w", err)
+	for i := 0; i < 3; i++ {
+		resp, err := httpClient.PostForm(urlStr, url.Values{
+			"device_id": {deviceId},
+		})
+		if err != nil {
+			log.Printf("Connect attempt %d failed when requesting: %v", i+1, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		log.Printf("Connect attempt %d failed with status code: %d", i+1, resp.StatusCode)
+		time.Sleep(1 * time.Second)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to connect with status code: %v", resp.StatusCode)
-	}
-
-	_, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-	return nil
+	return fmt.Errorf("error with connect request after retries")
 }
 
 func sendDisConnectRequest(host string, port int) error {
 	urlStr := fmt.Sprintf("http://%s:%d/disconnect", host, port)
-	resp, err := http.Get(urlStr)
-	if err != nil {
-		return fmt.Errorf("failed to send disconnect request: %w", err)
-	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to connect with status code: %v", resp.StatusCode)
+	for i := 0; i < 3; i++ {
+		resp, err := httpClient.Get(urlStr)
+		if err != nil {
+			log.Printf("Disconnect attempt %d failed when requesting: %v", i+1, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		log.Printf("Disconnect attempt %d failed with status code: %d", i+1, resp.StatusCode)
+		time.Sleep(1 * time.Second)
 	}
-
-	_, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("error with disconnect request after retries")
 }
-
 func sendLoginRequest(deviceId string, zoneId string, siteId string) (*Instance, error) {
 	urlStr := fmt.Sprintf("%s://%s:%s/%s", config.USERCENTERPROTOCOL, config.USERCENTERHOST, config.USERCENTERPORT, config.LOGINPATH)
-	resp, err := http.PostForm(urlStr, url.Values{
+	resp, err := httpClient.PostForm(urlStr, url.Values{
 		"zone_id":   {zoneId},
 		"site_id":   {siteId},
 		"device_id": {deviceId},
@@ -366,7 +366,7 @@ func sendLoginRequest(deviceId string, zoneId string, siteId string) (*Instance,
 
 func sendLogoutRequest(deviceId string, zoneId string) error {
 	urlStr := fmt.Sprintf("%s://%s:%s/%s", config.USERCENTERPROTOCOL, config.USERCENTERHOST, config.USERCENTERPORT, config.LOGOUTPATH)
-	resp, err := http.PostForm(urlStr, url.Values{
+	resp, err := httpClient.PostForm(urlStr, url.Values{
 		"zone_id":   {zoneId},
 		"device_id": {deviceId},
 	})
