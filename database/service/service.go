@@ -6,6 +6,7 @@ import (
 	"fmt"
 )
 
+// GetFirstRecord 获取history表中最早的日期
 func GetFirstRecord() (string, error) {
 	rows, err := database.DB.Query("SELECT date FROM history_huadong ORDER BY date LIMIT 1")
 	if err != nil {
@@ -25,6 +26,7 @@ func GetFirstRecord() (string, error) {
 	}
 }
 
+// GetLastRecord 获取history表中最晚的日期
 func GetLastRecord() (string, error) {
 	rows, err := database.DB.Query("SELECT date FROM history_huadong ORDER BY date DESC LIMIT 1")
 	if err != nil {
@@ -44,6 +46,7 @@ func GetLastRecord() (string, error) {
 	}
 }
 
+// GetRecordWithDate 获取history表中指定date的记录
 func GetRecordWithDate(date string) (map[string]int, error) {
 	rows, err := database.DB.Query("SELECT site_id, instances FROM history_huadong WHERE date = ?", date)
 	if err != nil {
@@ -67,7 +70,7 @@ func GetRecordWithDate(date string) (map[string]int, error) {
 	return records, nil
 }
 
-// InsertRecord 插入记录到 records 表
+// InsertRecord 插入记录到record表
 func InsertRecord(zoneID string, siteID string, date string, instances int, loginFailures int) error {
 	insertQuery := fmt.Sprintf("INSERT INTO record_%s (site_id, date, instances, login_failures) VALUES (?, ?, ?, ?)", zoneID)
 	if _, err := database.DB.Exec(insertQuery, siteID, date, instances, loginFailures); err != nil {
