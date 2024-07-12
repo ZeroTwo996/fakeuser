@@ -156,7 +156,9 @@ func main() {
 				}
 			}
 
-			dbservice.InsertRecord("huadong", siteID, curTime.Format(template), deviceCount(siteID), loginFailures)
+			if config.RECORDENABLED {
+				dbservice.InsertRecord("huadong", siteID, curTime.Format(template), deviceCount(siteID), loginFailures)
+			}
 			log.Printf("Current: %d devices in %s are online now", deviceCount(siteID), siteID)
 
 			prevRecords[siteID] = deviceCount(siteID)

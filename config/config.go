@@ -4,9 +4,11 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var (
+	RECORDENABLED      = true            // 是否开启定时记录任务，默认开启
 	LOGINPATH          = "device/login"  // 登录接口路径
 	LOGOUTPATH         = "device/logout" // 登出接口路径
 	USERCENTERPROTOCOL = "http"          // 用户交互模块协议
@@ -65,19 +67,24 @@ func init() {
 		log.Fatalf("Failed to get start time from env")
 	}
 
+	RECORDENABLEDSTR := os.Getenv("USERCENTER_RECORD_ENABLED")
+	if RECORDENABLEDSTR != "" {
+		RECORDENABLED = strings.EqualFold(RECORDENABLEDSTR, "false") // 与用户交互模块的定时记录任务开关相反
+	}
+
 	var err error
 	ACCELERATIONRATIO, err = strconv.Atoi(os.Getenv("ACCELERATION_RATIO"))
 	if err != nil {
 		log.Fatal("Failed to get acceleration ratio from env")
-	} else if ACCELERATIONRATIO == 0 {
-		log.Fatal("Acceleration ratio cannot be zero")
+	} else if ACCELERATIONRATIO <= 0 {
+		log.Fatal("Acceleration ratio must be positive")
 	}
 
 	SCALERATIO, err = strconv.Atoi(os.Getenv("SCALE_RATIO"))
 	if err != nil {
 		log.Fatal("Failed to get instance scale ratio from env")
-	} else if SCALERATIO == 0 {
-		log.Fatal("Instance scale ratio cannot be zero")
+	} else if SCALERATIO <= 0 {
+		log.Fatal("Instance scale ratio must be positive")
 	}
 
 }
