@@ -257,20 +257,24 @@ func deviceLogout(num int, zoneID string, siteID string) {
 
 		onlineDevices[siteID].Delete(deviceID)
 
+		var ok = true
 		// 2.1 向实例发出断开连接请求
 		err := sendDisConnectRequest(device.Host, device.Port)
 		if err != nil {
 			log.Printf("Failed to disconnect instance: %v", err)
-			continue
+			ok = false
 		}
 
 		// 2.2 向用户交互模块发出登出请求
 		err = sendLogoutRequest(device.DeviceID, device.ZoneID)
 		if err != nil {
 			log.Printf("Failed to log out from usercenter: %v", err)
-			continue
+			ok = false
 		}
-		devicesLoggedOut = append(devicesLoggedOut, deviceID)
+
+		if ok {
+			devicesLoggedOut = append(devicesLoggedOut, deviceID)
+		}
 	}
 
 	arrays := devicesLoggedOut
