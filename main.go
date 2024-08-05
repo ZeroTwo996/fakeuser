@@ -233,56 +233,51 @@ func deviceLogin(zoneID string, siteID string, num int) int {
 	return num - len(devices)
 }
 
-func deviceLogout(num int, zoneID string, siteID string) {
-
-	// 1. 选择num个在对应zone和site的设备
-	var devices []string
+func deviceLogout(num int, zoneID string, siteID string) int {
+	var devicesLoggedOut []string
+	// 1. 遍历map，将num个设备登出
 	onlineDevices[siteID].Range(func(key, value interface{}) bool {
 		device := value.(Device)
-		if device.ZoneID == zoneID && device.SiteID == siteID {
-			devices = append(devices, device.DeviceID)
+
+		// 向实例发出断开连接请求
+		err := sendDisConnectRequest(device.Host, device.Port)
+		if err != nil {
+			log.Printf("Failed to disconnect instance: %v", err)
+		} else {
+			// 断开连接成功后，向用户交互模块发出登出请求
+			err = sendLogoutRequest(device.DeviceID, device.ZoneID)
+			if err != nil {
+				log.Printf("Failed to log out from usercenter: %v", err)
+			} else {
+				devicesLoggedOut = append(devicesLoggedOut, device.DeviceID)
+			}
 		}
-		// 记录了足够的设备就退出遍历
-		if len(devices) >= num {
+
+		if len(devicesLoggedOut) >= num {
 			return false
 		}
 		return true
 	})
 
-	// 2. 将选中的设备调用登出接口，并在map中删除
-	var devicesLoggedOut []string
-	for _, deviceID := range devices {
-		value, _ := onlineDevices[siteID].Load(deviceID)
-		device := value.(Device)
-
+	// 2. 将设备从map中删除
+	for _, deviceID := range devicesLoggedOut {
 		onlineDevices[siteID].Delete(deviceID)
-
-		var ok = true
-		// 2.1 向实例发出断开连接请求
-		err := sendDisConnectRequest(device.Host, device.Port)
-		if err != nil {
-			log.Printf("Failed to disconnect instance: %v", err)
-			ok = false
-		}
-
-		// 2.2 向用户交互模块发出登出请求
-		err = sendLogoutRequest(device.DeviceID, device.ZoneID)
-		if err != nil {
-			log.Printf("Failed to log out from usercenter: %v", err)
-			ok = false
-		}
-
-		if ok {
-			devicesLoggedOut = append(devicesLoggedOut, deviceID)
-		}
 	}
 
-	arrays := devicesLoggedOut
-	if len(arrays) > 4 {
-		arrays = arrays[:4]
-		arrays = append(arrays, "...")
+	// 3. 日志打印，判断是否num个数量成功登出
+	numLoggedOut := len(devicesLoggedOut)
+	printArray := devicesLoggedOut
+	if numLoggedOut > 4 {
+		printArray = devicesLoggedOut[:3]
+		printArray = append(printArray, "...")
+		printArray = append(printArray, devicesLoggedOut[len(devicesLoggedOut)-1])
 	}
-	log.Printf("[%s] %d devices logged out in %s, %s", strings.Join(arrays, ", "), len(devicesLoggedOut), siteID, zoneID)
+	log.Printf("[%s] %d devices logged out in %s, %s", strings.Join(printArray, ", "), len(devicesLoggedOut), siteID, zoneID)
+
+	if numLoggedOut != num {
+		log.Printf("%d devices needed to log out in this turn, but %d devices failed to log out", num, num-numLoggedOut)
+	}
+	return num - numLoggedOut
 }
 
 func deviceCount(siteID string) int {
