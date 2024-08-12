@@ -131,35 +131,36 @@ func main() {
 
 		for siteID, currInstances := range currRecords {
 			log.Println("**********************************")
+			log.Printf("Dealing '%s' site...\n", siteID)
 			var loginFailures int
 			if firstRequest {
 				// 首次需要特殊处理，直接登录相应数量用户
 				loginFailures = deviceLogin("huadong", siteID, currInstances)
 				if loginFailures != 0 {
-					log.Printf("Failure: %d devices in %s failed to login", loginFailures, siteID)
+					log.Printf("Warning: %d devices failed to login", loginFailures)
 				}
 			} else {
 				// 余下只需要跟上一分钟对比
 				prevInstances, ok := prevRecords[siteID]
 				if !ok {
-					log.Printf("No previous record found for site %s", siteID)
+					log.Printf("No previous record found")
 					continue
 				}
 				diff := currInstances - prevInstances
 				if diff > 0 {
 					loginFailures = deviceLogin("huadong", siteID, diff)
 					if loginFailures != 0 {
-						log.Printf("Failure: %d devices in %s failed to login", loginFailures, siteID)
+						log.Printf("Warning: %d devices failed to login", loginFailures)
 					}
 				} else if diff < 0 {
-					deviceLogout(-diff, "huadong", siteID)
+					logoutDevices(-diff, siteID)
 				}
 			}
 
 			if config.RECORDENABLED {
 				dbservice.InsertRecord("huadong", siteID, curTime.Format(template), deviceCount(siteID), loginFailures)
 			}
-			log.Printf("Current: %d devices in %s are online now", deviceCount(siteID), siteID)
+			log.Printf("Current: %d devices are online now", deviceCount(siteID))
 
 			prevRecords[siteID] = deviceCount(siteID)
 		}
@@ -196,7 +197,7 @@ func deviceLogin(zoneID string, siteID string, num int) int {
 			}
 
 			// 向用户交互模块发出登录请求，获取实例信息
-			instance, err := sendLoginRequest(device.DeviceID, device.ZoneID, device.SiteID)
+			instance, err := sendLoginRequest(device.ZoneID, device.SiteID, device.DeviceID)
 			if err != nil {
 				log.Printf("Failed to log in: %v", err)
 				return
@@ -229,55 +230,98 @@ func deviceLogin(zoneID string, siteID string, num int) int {
 		arrays = arrays[:3]
 		arrays = append(arrays, "...")
 	}
-	log.Printf("[%s] %d devices logged in %s, %s", strings.Join(arrays, ", "), len(devices), siteID, zoneID)
+	log.Printf("[%s] %d devices logged in", strings.Join(arrays, ", "), len(devices))
 	return num - len(devices)
 }
 
-func deviceLogout(num int, zoneID string, siteID string) int {
-	var devicesLoggedOut []string
-	// 1. 遍历map，将num个设备登出
-	onlineDevices[siteID].Range(func(key, value interface{}) bool {
-		device := value.(Device)
-
-		// 向实例发出断开连接请求
-		err := sendDisConnectRequest(device.Host, device.Port)
-		if err != nil {
-			log.Printf("Failed to disconnect instance: %v", err)
-		} else {
-			// 断开连接成功后，向用户交互模块发出登出请求
-			err = sendLogoutRequest(device.DeviceID, device.ZoneID)
-			if err != nil {
-				log.Printf("Failed to log out from usercenter: %v", err)
-			} else {
-				devicesLoggedOut = append(devicesLoggedOut, device.DeviceID)
-			}
-		}
-
-		if len(devicesLoggedOut) >= num {
-			return false
-		}
-		return true
-	})
-
-	// 2. 将设备从map中删除
-	for _, deviceID := range devicesLoggedOut {
-		onlineDevices[siteID].Delete(deviceID)
+func logoutDevice(device Device) bool {
+	// 1. 向实例发出断开连接请求
+	err := sendDisConnectRequest(device.Host, device.Port)
+	if err != nil {
+		log.Printf("Failed to disconnect instance: %v", err)
+		return false
+	}
+	// 2. 断开连接成功后，向用户交互模块发出登出请求
+	err = sendLogoutRequest(device.ZoneID, device.SiteID, device.DeviceID)
+	if err != nil {
+		log.Printf("Failed to log out from usercenter: %v", err)
+		return false
 	}
 
+	return true
+}
+
+func logoutDevices(num int, siteID string) {
+	// 1. 筛选绑定实例可用（网络可达）的在线设备
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var instanceHealthyDevices sync.Map
+	var totalCount = 0
+	var healthyCount = 0
+
+	onlineDevices[siteID].Range(func(key, value any) bool {
+		device := value.(Device)
+		totalCount++
+		wg.Add(1)
+		go func(d Device) {
+			defer wg.Done()
+
+			if healthy := checkInstanceHealthy(d); healthy {
+				instanceHealthyDevices.Store(d.DeviceID, d)
+				mu.Lock()
+				healthyCount++
+				mu.Unlock()
+			}
+		}(device)
+		return true
+	})
+	wg.Wait()
+
+	if healthyCount != totalCount {
+		log.Printf("Warning: there are %d instances totally, but %d are unhealthy", totalCount, totalCount-healthyCount)
+	}
+
+	// 2. 登出num个设备
+	var devicesLoggedOut []string
+	var attemptCount = 0
+	wg = sync.WaitGroup{}
+	instanceHealthyDevices.Range(func(key, value any) bool {
+		device := value.(Device)
+		if attemptCount == num {
+			return false
+		} else {
+			attemptCount++
+		}
+		wg.Add(1)
+		go func(d Device) {
+			defer wg.Done()
+
+			if ok := logoutDevice(d); ok {
+				mu.Lock()
+				devicesLoggedOut = append(devicesLoggedOut, d.DeviceID)
+				mu.Unlock()
+			}
+			onlineDevices[siteID].Delete(d.DeviceID) // 登出失败也删除
+
+		}(device)
+
+		return true
+	})
+	wg.Wait()
+
 	// 3. 日志打印，判断是否num个数量成功登出
-	numLoggedOut := len(devicesLoggedOut)
+	successCount := len(devicesLoggedOut)
 	printArray := devicesLoggedOut
-	if numLoggedOut > 4 {
+	if successCount > 4 {
 		printArray = devicesLoggedOut[:3]
 		printArray = append(printArray, "...")
 		printArray = append(printArray, devicesLoggedOut[len(devicesLoggedOut)-1])
 	}
-	log.Printf("[%s] %d devices logged out in %s, %s", strings.Join(printArray, ", "), len(devicesLoggedOut), siteID, zoneID)
+	log.Printf("[%s] %d devices logged out in", strings.Join(printArray, ", "), len(devicesLoggedOut))
 
-	if numLoggedOut != num {
-		log.Printf("%d devices needed to log out in this turn, but %d devices failed to log out", num, num-numLoggedOut)
+	if successCount != num {
+		log.Printf("Warning: Trying to log out %d devices, but only %d devices logged out", num, successCount)
 	}
-	return num - numLoggedOut
 }
 
 func deviceCount(siteID string) int {
@@ -289,9 +333,19 @@ func deviceCount(siteID string) int {
 	return count
 }
 
+func checkInstanceHealthy(device Device) bool {
+	url := fmt.Sprintf("http://%s:%d/healthz", device.Host, device.Port)
+
+	resp, err := httpClient.Get(url)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		return true
+	}
+	return false
+}
+
 func sendConnectRequest(deviceId string, host string, port int) error {
 	urlStr := fmt.Sprintf("http://%s:%d/connect", host, port)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		resp, err := httpClient.PostForm(urlStr, url.Values{
 			"device_id": {deviceId},
 		})
@@ -313,7 +367,7 @@ func sendConnectRequest(deviceId string, host string, port int) error {
 func sendDisConnectRequest(host string, port int) error {
 	urlStr := fmt.Sprintf("http://%s:%d/disconnect", host, port)
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		resp, err := httpClient.Get(urlStr)
 		if err != nil {
 			log.Printf("Disconnect attempt %d failed when requesting: %v", i+1, err)
@@ -329,7 +383,8 @@ func sendDisConnectRequest(host string, port int) error {
 	}
 	return fmt.Errorf("error with disconnect request after retries")
 }
-func sendLoginRequest(deviceId string, zoneId string, siteId string) (*Instance, error) {
+
+func sendLoginRequest(zoneId string, siteId string, deviceId string) (*Instance, error) {
 	urlStr := fmt.Sprintf("%s://%s:%s/%s", config.USERCENTERPROTOCOL, config.USERCENTERHOST, config.USERCENTERPORT, config.LOGINPATH)
 	resp, err := httpClient.PostForm(urlStr, url.Values{
 		"zone_id":   {zoneId},
@@ -365,10 +420,11 @@ func sendLoginRequest(deviceId string, zoneId string, siteId string) (*Instance,
 	return deviceLoginResponse.Instance, nil
 }
 
-func sendLogoutRequest(deviceId string, zoneId string) error {
+func sendLogoutRequest(zoneId string, siteId string, deviceId string) error {
 	urlStr := fmt.Sprintf("%s://%s:%s/%s", config.USERCENTERPROTOCOL, config.USERCENTERHOST, config.USERCENTERPORT, config.LOGOUTPATH)
 	resp, err := httpClient.PostForm(urlStr, url.Values{
 		"zone_id":   {zoneId},
+		"site_id":   {siteId},
 		"device_id": {deviceId},
 	})
 	if err != nil {
