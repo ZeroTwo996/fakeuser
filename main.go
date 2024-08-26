@@ -164,7 +164,10 @@ func main() {
 			prevRecords[siteID] = deviceCount(siteID)
 		}
 		if config.RECORDENABLED {
-			dbservice.InsertRecords("huadong", zoneRecords)
+			err := dbservice.InsertRecords("huadong", zoneRecords)
+			if err != nil {
+				log.Printf("Failed to insert records: %v", err)
+			}
 		}
 		preTime = curTime
 		firstRequest = false

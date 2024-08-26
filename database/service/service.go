@@ -83,7 +83,7 @@ func GetRecordWithDate(date string) (map[string]int, error) {
 func InsertRecords(zoneID string, records []RecordData) error {
 	// 构建SQL语句
 	var builder strings.Builder
-	builder.WriteString("INSERT INTO records (site_id, date, instances, login_failures) VALUES ")
+	builder.WriteString(fmt.Sprintf("INSERT INTO record_%s (site_id, date, instances, login_failures) VALUES ", zoneID))
 
 	// 动态添加每条记录
 	first := true
