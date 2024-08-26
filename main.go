@@ -254,36 +254,25 @@ func logoutDevice(device Device) bool {
 func logoutDevices(num int, siteID string) {
 	// 1. 筛选绑定实例可用（网络可达）的在线设备
 	var wg sync.WaitGroup
-	var mu sync.Mutex
 	var instanceHealthyDevices sync.Map
-	var totalCount = 0
-	var healthyCount = 0
-
 	onlineDevices[siteID].Range(func(key, value any) bool {
 		device := value.(Device)
-		totalCount++
 		wg.Add(1)
 		go func(d Device) {
 			defer wg.Done()
 
 			if healthy := checkInstanceHealthy(d); healthy {
 				instanceHealthyDevices.Store(d.DeviceID, d)
-				mu.Lock()
-				healthyCount++
-				mu.Unlock()
 			}
 		}(device)
 		return true
 	})
 	wg.Wait()
 
-	if healthyCount != totalCount {
-		log.Printf("Warning: there are %d instances totally, but %d are unhealthy", totalCount, totalCount-healthyCount)
-	}
-
 	// 2. 登出num个设备
 	var devicesLoggedOut []string
 	var attemptCount = 0
+	var mu sync.Mutex
 	wg = sync.WaitGroup{}
 	instanceHealthyDevices.Range(func(key, value any) bool {
 		device := value.(Device)
@@ -320,7 +309,7 @@ func logoutDevices(num int, siteID string) {
 	log.Printf("[%s] %d devices logged out in", strings.Join(printArray, ", "), len(devicesLoggedOut))
 
 	if successCount != num {
-		log.Printf("Warning: Trying to log out %d devices, but only %d devices logged out", num, successCount)
+		log.Printf("Error: Trying to log out %d devices, but only %d devices logged out", num, successCount)
 	}
 }
 
