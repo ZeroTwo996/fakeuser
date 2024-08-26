@@ -129,6 +129,7 @@ func main() {
 			break
 		}
 
+		var zoneRecords []dbservice.RecordData
 		for siteID, currInstances := range currRecords {
 			log.Println("**********************************")
 			log.Printf("Dealing '%s' site...\n", siteID)
@@ -157,12 +158,13 @@ func main() {
 				}
 			}
 
-			if config.RECORDENABLED {
-				dbservice.InsertRecord("huadong", siteID, curTime.Format(template), deviceCount(siteID), loginFailures)
-			}
+			zoneRecords = append(zoneRecords, dbservice.RecordData{SiteID: siteID, Date: curTime.Format(template), Instances: deviceCount(siteID), LoginFailures: loginFailures})
 			log.Printf("Current: %d devices are online now", deviceCount(siteID))
 
 			prevRecords[siteID] = deviceCount(siteID)
+		}
+		if config.RECORDENABLED {
+			dbservice.InsertRecords("huadong", zoneRecords)
 		}
 		preTime = curTime
 		firstRequest = false

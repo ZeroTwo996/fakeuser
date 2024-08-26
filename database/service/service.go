@@ -4,7 +4,16 @@ import (
 	"fakeuser/config"
 	"fakeuser/database"
 	"fmt"
+	"strings"
 )
+
+// RecordData 用于存储要插入的记录数据
+type RecordData struct {
+	SiteID        string
+	Date          string
+	Instances     int
+	LoginFailures int
+}
 
 // GetFirstRecord 获取history表中最早的日期
 func GetFirstRecord() (string, error) {
@@ -70,10 +79,33 @@ func GetRecordWithDate(date string) (map[string]int, error) {
 	return records, nil
 }
 
-// InsertRecord 插入记录到record表
-func InsertRecord(zoneID string, siteID string, date string, instances int, loginFailures int) error {
-	insertQuery := fmt.Sprintf("INSERT INTO record_%s (site_id, date, instances, login_failures) VALUES (?, ?, ?, ?)", zoneID)
-	if _, err := database.DB.Exec(insertQuery, siteID, date, instances, loginFailures); err != nil {
+// InsertRecords 插入记录到record表
+func InsertRecords(zoneID string, records []RecordData) error {
+	// 构建SQL语句
+	var builder strings.Builder
+	builder.WriteString("INSERT INTO records (site_id, date, instances, login_failures) VALUES ")
+
+	// 动态添加每条记录
+	first := true
+	for _, record := range records {
+		if !first {
+			builder.WriteString(", ")
+		}
+		builder.WriteString("(")
+		builder.WriteString("'")
+		builder.WriteString(record.SiteID)
+		builder.WriteString("', '")
+		builder.WriteString(record.Date)
+		builder.WriteString("', ")
+		builder.WriteString(fmt.Sprintf("%d", record.Instances))
+		builder.WriteString(", ")
+		builder.WriteString(fmt.Sprintf("%d", record.LoginFailures))
+		builder.WriteString(")")
+		first = false
+	}
+
+	insertQuery := builder.String()
+	if _, err := database.DB.Exec(insertQuery); err != nil {
 		return err
 	}
 
